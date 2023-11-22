@@ -1,7 +1,7 @@
 import http from "node:http";
 import fs from "node:fs/promises";
-import { sendData, sendError } from "./modules/send.js";
-import { checkFile } from "./modules/checkFile.js";
+import { sendError } from "./modules/send.js";
+import { checkFileExist, createFileIfNotExist } from "./modules/checkFile.js";
 import { handleComediansRequest } from "./modules/handleComediansRequest.js";
 import { handleAddClient } from "./modules/handleAddClient.js";
 import { handlClientsRequest } from "./modules/handlClientsRequest.js";
@@ -11,46 +11,51 @@ const PORT = 8080;
 const COMEDIANS = './comedians.json';
 export const CLIENTS = './clients.json';
 
-const startServer = async () => {
-    if (!(await checkFile(COMEDIANS))) {
+const startServer = async (port) => {
+    if (!(await checkFileExist(COMEDIANS))) {
         return
     };
 
-    await checkFile(CLIENTS, true);
+    await createFileIfNotExist(CLIENTS);
 
     const comediansData = await fs.readFile(COMEDIANS, "utf-8");
     const comedians = JSON.parse(comediansData);
 
-    http
+    const server = http
         .createServer(async (req, res) => {
             try {
                 res.setHeader("Access-Control-Allow-Origin", "*");             // Предоставление доступа определенным сайтам. * - значит всем!
 
                 const segments = req.url.split('/').filter(Boolean);
 
-                if (req.method === "GET" && segments[0] === "comedians") {
-                    // Получение stand up коммиков
-                    handleComediansRequest(req, res, comedians, segments);
+                if (!segments.length) {
+                    sendError(res, 404, `Not found`);
                     return;
                 };
 
-                if (req.method === "POST" && segments[0] === "clients") {
+                const [resource, id] = segments;
+
+                if (req.method === "GET" && resource === "comedians") {
+                    // Получение stand up коммиков
+                    handleComediansRequest(req, res, comedians, id);
+                    return;
+                };
+
+                if (req.method === "POST" && resource === "clients") {
                     // Добавление клиента
                     handleAddClient(req, res);
                     return;
                 };
 
-                if (req.method === "GET" && segments[0] === "clients" && segments.length === 2) {
+                if (req.method === "GET" && resource === "clients" && id) {
                     // Получение клиента по номеру билета
-                    const ticketNumber = segments[1];
-
-                    handlClientsRequest(req, res, ticketNumber);
+                    handlClientsRequest(req, res, id);
                     return;
                 };
 
-                if (req.method === "PATCH" && segments[0] === "clients" && segments.length === 2) {
+                if (req.method === "PUT" && resource === "clients" && id) {
                     // Обновление клиента по номеру билета
-                    handleUpdateClient(req, res, segments);
+                    handleUpdateClient(req, res, id);
                     return;
                 };
 
@@ -59,10 +64,20 @@ const startServer = async () => {
                 sendError(res, 500, `Ошибка сервера: ${error}`);
             }
 
-        })
-        .listen(PORT)
+        });
 
-    console.log(`Сервер запущен на: http://localhost:${PORT}`);
+    server.listen(port, () => {
+        console.log(`Сервер запущен на: http://localhost:${port}`);
+    });
+
+    server.on('error', (error) => {
+        if (error = 'EADDRINUSE') {
+            console.log(`Порт ${port} занят, пробуем запустить на порту ${port + 1}`);
+            startServer(port + 1)
+        } else {
+            console.error(`Возникла ошибка: ${error}`);
+        }
+    })
 }
 
-startServer();
+startServer(PORT);
